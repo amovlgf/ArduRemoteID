@@ -20,12 +20,22 @@ public:
         state = _state;
     }
     void update(void);
+#ifdef STATUS_LED_INIT_DISPLAY_MS
+    void start_init_display(void);
+#endif
 
 private:
     void init(void);
     bool done_init;
     uint32_t last_led_trig_ms;
     LedState state;
+
+#ifdef STATUS_LED_HEARTBEAT
+    LedState last_state = LedState::INIT;
+#ifdef STATUS_LED_INIT_DISPLAY_MS
+    bool init_display_active = false;
+#endif
+#endif
 
 #ifdef WS2812_LED_PIN
     uint32_t last_led_strip_ms;

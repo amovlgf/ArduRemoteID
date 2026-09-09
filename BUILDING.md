@@ -28,6 +28,20 @@
  - cd RemoteIDModule
  - make
 
+AMOV RemoteID is an ESP32-C3 module integrated into the
+[FlyCore I225U V1](https://www.amovlab.top/pages/wiki-flycore),
+not a standalone product. To build only this target, run:
+
+```
+cd RemoteIDModule
+make amov-rid
+```
+
+This creates two files:
+
+ - `ArduRemoteID-AMOV_RID.bin`: complete image for initial flashing
+ - `ArduRemoteID_AMOV_RID_OTA.bin`: application image for signed web updates (`BOARD_ID` 13)
+
 ### Step3: Use make to upload
 
  - cd RemoteIDModule
@@ -35,6 +49,23 @@
 
 If the board does not flash, hold-down the BOOT pushbutton on the PCB while pressing the RESET pushbutton briefly [to force it into bootloader mode] and retry.
 The ESP32-S3 is now running and emitting test/demo remote-id bluetooth
+
+### AMOV_RID initial flashing
+
+AMOV_RID initial programming uses the ESP32-C3 native USB Serial/JTAG
+interface. The module does not expose a manual BOOT recovery path.
+
+Validate initial flashing with at least one blank ESP32-C3FH4 device, then
+verify that a module running the normal firmware can be flashed repeatedly
+through the same USB interface.
+Web OTA using `ArduRemoteID_AMOV_RID_OTA.bin` is the preferred field-update
+path. AMOV_RID supports `LOCK_LEVEL` values only up to 1 and does not support
+permanent eFuse lockdown. Do not burn eFuses that disable USB Serial/JTAG or
+ROM download support, because doing so may leave the module without a
+recoverable wired flashing path.
+
+AMOV_RID communicates with the flight controller only through DroneCAN at
+1 Mbit/s (CAN TX GPIO4, CAN RX GPIO5); MAVLink is disabled for this target.
 
 If you get an error about missing serial support from python, install it with `python -m pip install pyserial`.
 

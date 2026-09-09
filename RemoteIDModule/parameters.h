@@ -66,7 +66,7 @@ public:
         uint8_t min_len;
         void set_float(float v) const;
         void set_uint8(uint8_t v) const;
-        void set_int8(int8_t v) const;
+        bool set_int8(int64_t v) const;
         void set_uint32(uint32_t v) const;
         void set_char20(const char *v) const;
         void set_char64(const char *v) const;

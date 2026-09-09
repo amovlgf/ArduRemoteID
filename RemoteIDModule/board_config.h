@@ -24,6 +24,26 @@
 
 #define WS2812_LED_PIN GPIO_NUM_8
 
+#elif defined(BOARD_AMOV_RID)
+#define BOARD_ID 13
+
+// GPIO9 is the unexposed boot strap. GPIO18/19 stay reserved for native USB,
+// and UART0 diagnostics use the ESP32-C3 defaults on GPIO21/20.
+#define PIN_CAN_TX GPIO_NUM_4
+#define PIN_CAN_RX GPIO_NUM_5
+
+#define PIN_STATUS_LED GPIO_NUM_10
+#define STATUS_LED_ACTIVE HIGH
+#define STATUS_LED_HEARTBEAT 1
+#define STATUS_LED_INIT_TOGGLE_MS 100U
+#define STATUS_LED_INIT_DISPLAY_MS 500U
+#define STATUS_LED_HEARTBEAT_PERIOD_MS 1000U
+#define STATUS_LED_HEARTBEAT_ON_MS 100U
+
+#define AP_MAVLINK_ENABLED 0
+#define LOCK_LEVEL_MAX 1
+#define CAN_APP_NODE_NAME "AMOV RemoteID"
+
 #elif defined(BOARD_BLUEMARK_DB200)
 #define BOARD_ID 3
 
@@ -166,4 +186,8 @@
 
 #else
 #error "unsupported board"
+#endif
+
+#ifndef LOCK_LEVEL_MAX
+#define LOCK_LEVEL_MAX 2
 #endif

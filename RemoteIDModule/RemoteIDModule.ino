@@ -73,8 +73,10 @@ void setup()
     // Serial for debug printf
     Serial.begin(g.baudrate);
 
+#if AP_MAVLINK_ENABLED
     // Serial1 for MAVLink
     Serial1.begin(g.baudrate, SERIAL_8N1, PIN_UART_RX, PIN_UART_TX);
+#endif
 
     // set all fields to invalid/initial values
     odid_initUasData(&UAS_data);
@@ -132,6 +134,10 @@ void setup()
     esp_log_level_set("*", ESP_LOG_DEBUG);
 
     esp_ota_mark_app_valid_cancel_rollback();
+
+#if defined(STATUS_LED_INIT_DISPLAY_MS)
+    led.start_init_display();
+#endif
 }
 
 #define IMIN(x,y) ((x)<(y)?(x):(y))

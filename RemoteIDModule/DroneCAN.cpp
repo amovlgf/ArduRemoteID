@@ -631,7 +631,7 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
                 if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
                     return;
                 }
-                vp->set_int8(int8_t(req.value.integer_value));
+                vp->set_int8(req.value.integer_value);
                 break;
             case Parameters::ParamType::UINT32:
                 if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {

@@ -10,7 +10,7 @@ Parameters g;
 static nvs_handle handle;
 
 const Parameters::Param Parameters::params[] = {
-    { "LOCK_LEVEL",        Parameters::ParamType::INT8,  (const void*)&g.lock_level,       0, -1, 2 },
+    { "LOCK_LEVEL",        Parameters::ParamType::INT8,  (const void*)&g.lock_level,       0, -1, LOCK_LEVEL_MAX },
     { "CAN_NODE",          Parameters::ParamType::UINT8,  (const void*)&g.can_node,         0, 0, 127 },
 #if defined(PIN_CAN_TERM)
     { "CAN_TERMINATE",     Parameters::ParamType::UINT8,  (const void*)&g.can_term,        0, 0, 1 },
@@ -156,11 +156,15 @@ void Parameters::Param::set_uint8(uint8_t v) const
     }
 }
 
-void Parameters::Param::set_int8(int8_t v) const
+bool Parameters::Param::set_int8(int64_t v) const
 {
+    if (v < int64_t(min_value) || v > int64_t(max_value)) {
+        return false;
+    }
     auto *p = (int8_t *)ptr;
-    *p = v;
+    *p = int8_t(v);
     nvs_set_i8(handle, name, *p);
+    return true;
 }
 
 void Parameters::Param::set_uint32(uint32_t v) const
@@ -272,7 +276,7 @@ void Parameters::Param::set_as_float(float v) const
             set_uint8(uint8_t(v));
             break;
         case ParamType::INT8:
-            set_int8(int8_t(v));
+            set_int8(int64_t(v));
             break;
         case ParamType::UINT32:
             set_uint32(uint32_t(v));
@@ -343,6 +347,15 @@ void Parameters::init(void)
         }
     }
 
+    if (g.lock_level > LOCK_LEVEL_MAX) {
+        Serial.printf("LOCK_LEVEL %d exceeds board maximum %d; using %d\n",
+                      int(g.lock_level), int(LOCK_LEVEL_MAX), int(LOCK_LEVEL_MAX));
+        if (set_by_name_int8("LOCK_LEVEL", LOCK_LEVEL_MAX) &&
+            nvs_commit(handle) != ESP_OK) {
+            Serial.printf("Failed to persist LOCK_LEVEL\n");
+        }
+    }
+
     if (strlen(g.wifi_ssid) == 0) {
         uint8_t mac[6] {};
         esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -401,8 +414,7 @@ bool Parameters::set_by_name_int8(const char *name, int8_t v)
     if (!f) {
         return false;
     }
-    f->set_int8(v);
-    return true;
+    return f->set_int8(v);
 }
 
 bool Parameters::set_by_name_char64(const char *name, const char *s)
@@ -426,8 +438,7 @@ bool Parameters::set_by_name_string(const char *name, const char *s)
             f->set_uint8(uint8_t(strtoul(s, nullptr, 0)));
             return true;
         case ParamType::INT8:
-            f->set_int8(int8_t(strtoul(s, nullptr, 0)));
-            return true;
+            return f->set_int8(strtol(s, nullptr, 0));
         case ParamType::UINT32:
             f->set_uint32(strtoul(s, nullptr, 0));
             return true;

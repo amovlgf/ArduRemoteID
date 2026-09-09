@@ -9,4 +9,6 @@
 #define AP_DRONECAN_ENABLED defined(PIN_CAN_TX) && defined(PIN_CAN_RX)
 
 // do we support MAVLink connnection to flight controller?
+#ifndef AP_MAVLINK_ENABLED
 #define AP_MAVLINK_ENABLED 1
+#endif

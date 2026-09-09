@@ -14,8 +14,8 @@ where they state that their product is compliant with the RemoteID regulation.
 
 ## Hardware Supported
 
-The firmware currently supports the ESP32-S3 and ESP32-C3 chips. There
-are 7 boards supported so far with more to come:
+The firmware currently supports the ESP32-S3 and ESP32-C3 chips. Several
+board designs are supported, with more to come:
 
  - the ESP32-S3 dev board: https://au.mouser.com/ProductDetail/356-ESP32S3DEVKTM1N8
  - the ESP32-C3 dev board: https://au.mouser.com/ProductDetail/Espressif-Systems/ESP32-C3-DevKitM-1
@@ -25,6 +25,7 @@ are 7 boards supported so far with more to come:
  - a Bluemark DB202mav from https://bluemark.io/ ([product page](https://dronescout.co/dronebeacon-mavlink-remote-id-transponder/) | [buy](https://dronescout.co/product/dronebeacon-mavlink-db202mav-transponder/))
  - a Bluemark DB210pro from https://bluemark.io/ ([product page](https://dronescout.co/dronebeacon-mavlink-remote-id-transponder/) | [buy](https://dronescout.co/product/dronebeacon-mavlink-dronecan-db210pro-transponder/))
  - Holybro Remote ID Module ([product page](https://holybro.com/products/remote-id/))
+ - AMOV RemoteID, an ESP32-C3 module integrated into the [FlyCore I225U V1](https://www.amovlab.top/pages/wiki-flycore) (not a standalone product)
 
 Hardware from https://wurzbachelectronics.com/ is expected to be added soon.
 
@@ -42,12 +43,28 @@ For the ESP32-C3 dev board the pins assumed in this firmware are:
  - CAN TX on pin 5
  - CAN RX on pin 4
 
-For CAN a suitable 1MBit bxCAN transceiver needs to be connected to
-the CAN TX/RX pins.
+The AMOV RemoteID module uses the `AMOV_RID` build target and `BOARD_ID` 13:
 
-You can also do MAVLink on the USB UART port (the one marked "UART" on
-the silkscreen). That allows for easy simulation testing by plugging
-in a micro USB cable.
+ - DroneCAN only, at 1 Mbit/s
+ - CAN TX on GPIO4
+ - CAN RX on GPIO5
+ - an active-high status LED on GPIO10
+
+The status LED toggles every 100 ms during a 500 ms startup indication. It is
+continuously on while the pre-flight or Remote ID data checks fail, and gives a
+100 ms pulse once per second when the Remote ID data is valid.
+
+The module does not expose a manual BOOT recovery path. See
+[BUILDING.md](BUILDING.md) for its initial-flashing and recovery limitations.
+Its maximum supported `LOCK_LEVEL` is 1; it does not support the permanent
+eFuse lockdown provided by level 2 on other boards.
+
+For development boards without an onboard CAN transceiver, a suitable
+1 Mbit/s CAN transceiver needs to be connected to the CAN TX/RX pins.
+
+On boards that enable MAVLink, you can also use the USB UART port (the one
+marked "UART" on the silkscreen). That allows for easy simulation testing by
+plugging in a micro USB cable. This does not apply to AMOV_RID.
 
 See board_config.h and Makefile for information on porting to new boards.
 
@@ -199,6 +216,9 @@ Setting LOCK_LEVEL=2 will also cause the ESP32 eFuses to be set to
 prevent firmware updates except via the signed web interface. This is
 a permanent change and cannot be undone even if the LOCK_LEVEL is
 changed back to 0 or 1 via SecureCommand.
+
+AMOV_RID supports a maximum `LOCK_LEVEL` of 1. It rejects level 2 and does not
+provide permanent eFuse lockdown.
 
 Setting LOCK_LEVEL=-1 will skip any checks for upgrading the firmware 
 via the web server like board ID check, signed firmware with a valid key.

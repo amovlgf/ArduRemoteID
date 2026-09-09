@@ -5,6 +5,7 @@
 #include <esp_efuse_table.h>
 #include "parameters.h"
 
+#if LOCK_LEVEL_MAX >= 2
 static const struct {
     const esp_efuse_desc_t **desc;
     const char *name;
@@ -56,4 +57,8 @@ void set_efuses(void)
         esp_efuse_batch_write_commit();
     }
 }
-
+#else
+void set_efuses(void)
+{
+}
+#endif
