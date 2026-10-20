@@ -7,6 +7,9 @@
 #include <opendroneid.h>
 #include "status.h"
 #include "util.h"
+#include "CNData.h"
+#include "parameters.h"
+#include <esp_ota_ops.h>
 
 extern ODID_UAS_Data UAS_data;
 extern String status_reason;
@@ -234,9 +237,24 @@ String status_json(void)
     if (status_reason != nullptr && status_reason.length() > 0) {
         reason = "(" + status_reason + ")";
     }
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    char cn_timestamp[24];
+    snprintf(cn_timestamp, sizeof(cn_timestamp), "%llu", (unsigned long long)cn_broadcast_data.timestamp_ms);
     const json_table_t table[] = {
         { "STATUS:VERSION", String(FW_VERSION_MAJOR) + "." + String(FW_VERSION_MINOR) + " " + githash},
         { "STATUS:BOARD_ID", String(BOARD_ID)},
+        { "STATUS:OTA_SLOT", running == nullptr ? "Unknown" : running->label },
+        { "CN:PROFILE", cn_mode_active ? "China GB 46750 (experimental Wi-Fi envelope)" : "OpenDroneID" },
+        { "CN:PENDING", (g.rid_profile == 1) != cn_mode_active ? "Restart required to change profile" : "" },
+        { "CN:HEALTH", cn_mode_active ? (cn_status_reason == nullptr ? "OK" : cn_status_reason) : "Inactive" },
+        { "CN:SOURCE", String(g.cn_can_node) },
+        { "CN:UAS_ID", String(g.cn_uas_id) },
+        { "CN:UIN", String(g.cn_uin) },
+        { "CN:WIFI_ID", String(g.cn_wifi_id) },
+        { "CN:LAT", cn_broadcast_data.unknown_fields & CN46750_FIELD_UNKNOWN(8) ? "Unknown" : String(cn_broadcast_data.drone_lat, 7) },
+        { "CN:LON", cn_broadcast_data.unknown_fields & CN46750_FIELD_UNKNOWN(8) ? "Unknown" : String(cn_broadcast_data.drone_lon, 7) },
+        { "CN:STATE", String(uint8_t(cn_broadcast_data.op_status)) },
+        { "CN:TIME", cn_broadcast_data.unknown_fields & CN46750_FIELD_UNKNOWN(20) ? "Unknown" : cn_timestamp },
         { "STATUS:UPTIME", String(hr) + ":" + String(minsec_str) },
         { "STATUS:FREEMEM", String(ESP.getFreeHeap()) },
         { "BASICID:UAType", ENUM_MAP(uatype, UAS_data.BasicID[0].UAType) },

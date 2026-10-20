@@ -116,8 +116,9 @@ void DroneCAN::arm_status_send(void)
     uint8_t buffer[DRONECAN_REMOTEID_ARMSTATUS_MAX_SIZE];
     dronecan_remoteid_ArmStatus arm_status {};
 
-    const uint8_t status = parse_fail==nullptr? MAV_ODID_ARM_STATUS_GOOD_TO_ARM:MAV_ODID_ARM_STATUS_PRE_ARM_FAIL_GENERIC;
-    const char *reason = parse_fail==nullptr?"":parse_fail;
+    const char *failure = cn_mode_active ? cn_status_reason : parse_fail;
+    const uint8_t status = failure==nullptr? MAV_ODID_ARM_STATUS_GOOD_TO_ARM:MAV_ODID_ARM_STATUS_PRE_ARM_FAIL_GENERIC;
+    const char *reason = failure==nullptr?"":failure;
 
     arm_status.status = status;
     arm_status.error.len = strlen(reason);
@@ -520,6 +521,12 @@ void DroneCAN::handle_SelfID(CanardRxTransfer* transfer)
 void DroneCAN::handle_System(CanardRxTransfer* transfer)
 {
     dronecan_remoteid_System pkt {};
+    if (cn_mode_active) {
+        if (dronecan_remoteid_System_decode(transfer, &pkt)) return;
+        cn_data.select_source(g.cn_can_node);
+        cn_data.receive_system(transfer->source_node_id, pkt, millis());
+        return;
+    }
     auto &mpkt = system;
     dronecan_remoteid_System_decode(transfer, &pkt);
 
@@ -561,6 +568,12 @@ void DroneCAN::handle_OperatorID(CanardRxTransfer* transfer)
 void DroneCAN::handle_Location(CanardRxTransfer* transfer)
 {
     dronecan_remoteid_Location pkt {};
+    if (cn_mode_active) {
+        if (dronecan_remoteid_Location_decode(transfer, &pkt)) return;
+        cn_data.select_source(g.cn_can_node);
+        cn_data.receive_location(transfer->source_node_id, pkt, millis());
+        return;
+    }
     auto &mpkt = location;
     dronecan_remoteid_Location_decode(transfer, &pkt);
     if (last_location_timestamp != pkt.timestamp) {
@@ -620,6 +633,24 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
             can_printf("Parameters locked");
         } else {
             // param set
+            if (vp->flags & PARAM_FLAG_CAN_ONLY) {
+                char value[24] {};
+                if (vp->ptype == Parameters::ParamType::UINT8 &&
+                    req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
+                    snprintf(value, sizeof(value), "%lld", (long long)req.value.integer_value);
+                } else if (vp->ptype == Parameters::ParamType::CHAR20 &&
+                           req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE &&
+                           req.value.string_value.len <= 20) {
+                    const uint8_t len = req.value.string_value.len;
+                    // Embedded NULs must not silently shorten a supplied identity.
+                    if (memchr(req.value.string_value.data, 0, len) != nullptr) return;
+                    memcpy(value, req.value.string_value.data, len);
+                } else return;
+                if (!g.set_by_name_string(vp->name, value, true)) {
+                    can_printf("CN parameter rejected");
+                    return;
+                }
+            } else
             switch (vp->ptype) {
             case Parameters::ParamType::UINT8:
                 if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
@@ -796,7 +827,7 @@ void DroneCAN::handle_SecureCommand(CanardInstance* ins, CanardRxTransfer* trans
             char *eq = strchr(command, '=');
             if (eq != nullptr) {
                 *eq = 0;
-                if (!g.set_by_name_string(command, eq+1)) {
+                if (!g.set_by_name_string(command, eq+1, true)) {
                     reply.result = DRONECAN_REMOTEID_SECURECOMMAND_RESPONSE_RESULT_FAILED;
                 }
             }

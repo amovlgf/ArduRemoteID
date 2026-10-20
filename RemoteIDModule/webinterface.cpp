@@ -13,6 +13,38 @@
 
 static WebServer server(80);
 
+class ESPOTAUploadBackend : public OTAUpload::Backend {
+public:
+    bool begin(size_t &capacity) override
+    {
+        partition = esp_ota_get_next_update_partition(nullptr);
+        if (partition == nullptr) {
+            return false;
+        }
+        capacity = partition->size;
+        return Update.begin(UPDATE_SIZE_UNKNOWN);
+    }
+
+    size_t write(const uint8_t *data, size_t size) override
+    {
+        return Update.write(const_cast<uint8_t *>(data), size);
+    }
+
+    bool verify(const uint8_t *lead, size_t size) override
+    {
+        return partition != nullptr && !Update.hasError() &&
+            CheckFirmware::check_OTA_next(partition, lead, size);
+    }
+
+    bool end() override { return !Update.hasError() && Update.end(true); }
+    void abort() override { Update.abort(); }
+
+private:
+    const esp_partition_t *partition = nullptr;
+};
+
+static ESPOTAUploadBackend ota_backend;
+
 /*
   serve files from ROMFS
  */
@@ -97,65 +129,30 @@ void WebInterface::init(void)
     server.addHandler( &ROMFS_Handler );
 
     /*handling uploading firmware file */
-    server.on("/update", HTTP_POST, []() {
-        if (Update.hasError()) {
-			server.sendHeader("Connection", "close");
-		    server.send(500, "text/plain","FAIL");
-		    Serial.printf("Update Failed: Update function has errors\n");
-		    delay(5000);
-		} else {
-			server.sendHeader("Connection", "close");
-			server.send(200, "text/plain","OK");
-			Serial.printf("Update Success: \nRebooting...\n");
-			delay(1000);
-			ESP.restart();
-		}
+    server.on("/update", HTTP_POST, [this]() {
+        server.sendHeader("Connection", "close");
+        if (!ota_upload.complete(ota_backend)) {
+            server.send(500, "text/plain", "FAIL");
+            Serial.printf("Update failed; current firmware remains active\n");
+            return;
+        }
+        server.send(200, "text/plain", "OK");
+        Serial.printf("Update success: rebooting\n");
+        delay(1000);
+        ESP.restart();
     }, [this]() {
         HTTPUpload& upload = server.upload();
-        static const esp_partition_t* partition_new_firmware = esp_ota_get_next_update_partition(NULL); //get OTA partion to which we will write new firmware file;
         if (upload.status == UPLOAD_FILE_START) {
             Serial.printf("Update: %s\n", upload.filename.c_str());
-            lead_len = 0;
-
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
-                Update.printError(Serial);
-            }
+            // Preserve the explicit LOCK_LEVEL=-1 development exception for
+            // raw images; normal uploads must carry the complete descriptor.
+            ota_upload.start(ota_backend, g.lock_level >= 0);
         } else if (upload.status == UPLOAD_FILE_WRITE) {
-            /* flashing firmware to ESP*/
-            if (lead_len < sizeof(lead_bytes)) {
-                uint32_t n = sizeof(lead_bytes)-lead_len;
-                if (n > upload.currentSize) {
-                    n = upload.currentSize;
-                }
-                memcpy(&lead_bytes[lead_len], upload.buf, n);
-                lead_len += n;
-            }
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
+            ota_upload.write(ota_backend, upload.buf, upload.currentSize);
         } else if (upload.status == UPLOAD_FILE_END) {
-            // write extra bytes to force flush of the buffer before we check signature
-            uint32_t extra = SPI_FLASH_SEC_SIZE+1;
-            while (extra--) {
-                uint8_t ff = 0xff;
-                Update.write(&ff, 1);
-            }
-            if (!CheckFirmware::check_OTA_next(partition_new_firmware, lead_bytes, lead_len)) {
-                Serial.printf("Update Failed: firmware checks have errors\n");
-                server.sendHeader("Connection", "close");
-                server.send(500, "text/plain","FAIL");
-                delay(5000);
-            } else if (Update.end(true)) {
-                Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-                server.sendHeader("Connection", "close");
-                server.send(200, "text/plain","OK");
-            } else {
-                Update.printError(Serial);
-                Serial.printf("Update Failed: Update.end function has errors\n");
-                server.sendHeader("Connection", "close");
-                server.send(500, "text/plain","FAIL");
-                delay(5000);
-            }
+            ota_upload.finish(ota_backend, upload.totalSize);
+        } else if (upload.status == UPLOAD_FILE_ABORTED) {
+            ota_upload.fail(ota_backend);
         }
     });
     Serial.printf("WAP started\n");

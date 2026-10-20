@@ -1,6 +1,7 @@
 
 #include "CANDriver.h"
 #include "transport.h"
+#include "CNData.h"
 #include <canard.h>
 
 #include <canard.h>
@@ -20,8 +21,10 @@ public:
     using Transport::Transport;
     void init(void) override;
     void update(void) override;
+    CNData &china_data() { return cn_data; }
 
 private:
+    CNData cn_data;
     uint32_t last_node_status_ms;
     CANDriver can_driver;
     CanardInstance canard;

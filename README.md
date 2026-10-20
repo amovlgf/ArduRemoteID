@@ -91,6 +91,14 @@ https://github.com/dronecan/DSDL/tree/master/dronecan/remoteid
 The DroneCAN messages are an exact mirror of the MAVLink messages to
 make a dual-transport implementation easy.
 
+An opt-in experimental China profile accepts the existing DroneCAN Location
+and System messages and encodes GB 46750-2025 broadcast payloads. It requires
+explicit identity, source-node and Wi-Fi vendor-identifier configuration;
+receiver interoperability and aircraft compliance have not been established.
+See the [AMOV_RID OTA and configuration guide](docs/CN_CAN_WIFI_OTA.md) and
+[test instructions](docs/CN_TESTING.md) (Chinese). The default profile remains
+OpenDroneID.
+
 ## Releases
 
 Pre-built releases are in the releases list folder on github.

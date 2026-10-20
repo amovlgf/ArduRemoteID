@@ -5,6 +5,8 @@
 #include <string.h>
 #include "romfs.h"
 #include "util.h"
+#include "CNData.h"
+#include <errno.h>
 
 Parameters g;
 static nvs_handle handle;
@@ -42,6 +44,13 @@ const Parameters::Param Parameters::params[] = {
     { "MAVLINK_SYSID",     Parameters::ParamType::UINT8,  (const void*)&g.mavlink_sysid,    0, 0, 254 },
     { "OPTIONS",           Parameters::ParamType::UINT8,  (const void*)&g.options,          0, 0, 254 },
     { "TO_DEFAULTS",     Parameters::ParamType::UINT8,  (const void*)&g.to_factory_defaults,    0, 0, 1 }, //if set to 1, reset to factory defaults and make 0.
+    // Append keys: existing NVS names/types and visible legacy indices stay stable.
+    { "RID_PROFILE",     Parameters::ParamType::UINT8, (const void*)&g.rid_profile, 0, 0, 1, PARAM_FLAG_CAN_ONLY },
+    { "CN_CAN_NODE",     Parameters::ParamType::UINT8, (const void*)&g.cn_can_node, 0, 1, 127, PARAM_FLAG_CAN_ONLY },
+    { "CN_CLASS",        Parameters::ParamType::UINT8, (const void*)&g.cn_class, 255, 0, 4, PARAM_FLAG_CAN_ONLY },
+    { "CN_UAS_ID",       Parameters::ParamType::CHAR20, (const void*)&g.cn_uas_id, 0, 0, 0, PARAM_FLAG_CAN_ONLY },
+    { "CN_UIN",          Parameters::ParamType::CHAR20, (const void*)&g.cn_uin, 0, 0, 0, PARAM_FLAG_CAN_ONLY },
+    { "CN_WIFI_ID",      Parameters::ParamType::CHAR20, (const void*)&g.cn_wifi_id, 0, 0, 0, PARAM_FLAG_CAN_ONLY },
     { "DONE_INIT",         Parameters::ParamType::UINT8,  (const void*)&g.done_init,        0, 0, 0, PARAM_FLAG_HIDDEN},
     { "",                  Parameters::ParamType::NONE,   nullptr,  },
 };
@@ -53,7 +62,7 @@ uint16_t Parameters::param_count_float(void)
 {
     uint16_t count = 0;
     for (const auto &p : params) {
-        if (p.flags & PARAM_FLAG_HIDDEN) {
+        if (p.flags & (PARAM_FLAG_HIDDEN | PARAM_FLAG_CAN_ONLY)) {
             continue;
         }
         switch (p.ptype) {
@@ -76,7 +85,7 @@ int16_t Parameters::param_index_float(const Parameters::Param *f)
 {
     uint16_t count = 0;
     for (const auto &p : params) {
-        if (p.flags & PARAM_FLAG_HIDDEN) {
+        if (p.flags & (PARAM_FLAG_HIDDEN | PARAM_FLAG_CAN_ONLY)) {
             continue;
         }
         switch (p.ptype) {
@@ -125,7 +134,7 @@ const Parameters::Param *Parameters::find_by_index_float(uint16_t index)
 {
     uint16_t count = 0;
     for (const auto &p : params) {
-        if (p.flags & PARAM_FLAG_HIDDEN) {
+        if (p.flags & (PARAM_FLAG_HIDDEN | PARAM_FLAG_CAN_ONLY)) {
             continue;
         }
         switch (p.ptype) {
@@ -247,6 +256,7 @@ const char *Parameters::Param::get_char64() const
  */
 bool Parameters::Param::get_as_float(float &v) const
 {
+    if (flags & PARAM_FLAG_CAN_ONLY) return false;
     switch (ptype) {
         case ParamType::UINT8:
             v = float(get_uint8());
@@ -271,6 +281,9 @@ bool Parameters::Param::get_as_float(float &v) const
  */
 void Parameters::Param::set_as_float(float v) const
 {
+    if (flags & PARAM_FLAG_CAN_ONLY) {
+        return;
+    }
     switch (ptype) {
         case ParamType::UINT8:
             set_uint8(uint8_t(v));
@@ -427,11 +440,39 @@ bool Parameters::set_by_name_char64(const char *name, const char *s)
     return true;
 }
 
-bool Parameters::set_by_name_string(const char *name, const char *s)
+bool Parameters::set_by_name_string(const char *name, const char *s, bool from_can)
 {
     const auto *f = find(name);
     if (!f) {
         return false;
+    }
+    if (f->flags & PARAM_FLAG_CAN_ONLY) {
+        if (!from_can || s == nullptr) return false;
+        if (f->ptype == ParamType::UINT8) {
+            char *end = nullptr;
+            errno = 0;
+            const long value = strtol(s, &end, 0);
+            if (errno || end == s || *end != 0 || value < f->min_value || value > f->max_value) return false;
+            if (strcmp(name, "RID_PROFILE") == 0 && value == 1) {
+                const CNConfig cfg {cn_uas_id, cn_uin, cn_wifi_id, cn_class, cn_can_node};
+                if (!CNData::valid_config(cfg)) return false;
+            }
+            if (nvs_set_u8(handle, name, uint8_t(value)) != ESP_OK || nvs_commit(handle) != ESP_OK) return false;
+            *(uint8_t *)f->ptr = uint8_t(value);
+        } else if (f->ptype == ParamType::CHAR20) {
+            const size_t len = strnlen(s, 21);
+            const size_t expected = strcmp(name, "CN_UAS_ID") == 0 ? 20 : 8;
+            if (len && len != expected) return false;
+            for (size_t i = 0; i < len; i++) {
+                if (uint8_t(s[i]) < 33 || uint8_t(s[i]) > 126) return false;
+            }
+            uint8_t identifier[4];
+            if (len && strcmp(name, "CN_WIFI_ID") == 0 && !CNData::parse_wifi_id(s, identifier)) return false;
+            if (nvs_set_str(handle, name, s) != ESP_OK || nvs_commit(handle) != ESP_OK) return false;
+            memset((void *)f->ptr, 0, 21);
+            memcpy((void *)f->ptr, s, len);
+        } else return false;
+        return true;
     }
     switch (f->ptype) {
         case ParamType::UINT8:

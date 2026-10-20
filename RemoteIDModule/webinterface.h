@@ -6,6 +6,7 @@
 #include "options.h"
 #include <Arduino.h>
 #include "version.h"
+#include "ota_upload.h"
 
 class WebInterface {
 public:
@@ -14,7 +15,5 @@ public:
 private:
     bool initialised = false;
 
-    // first 16 bytes for flashing, skip buffer in updater
-    uint8_t lead_bytes[16];
-    uint8_t lead_len;
+    OTAUpload ota_upload;
 };

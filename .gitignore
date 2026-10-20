@@ -4,3 +4,5 @@ git-version.h
 *.elf
 *.log
 romfs_files.h
+artifacts/
+__pycache__/

@@ -24,6 +24,7 @@
 #include <esp_ota_ops.h>
 #include "efuse.h"
 #include "led.h"
+#include "CNData.h"
 
 
 #if AP_DRONECAN_ENABLED
@@ -45,6 +46,9 @@ ODID_UAS_Data UAS_data;
 String status_reason;
 static uint32_t last_location_ms;
 static WebInterface webif;
+bool cn_mode_active = false;
+const char *cn_status_reason = "CN waiting for CAN";
+DroneRIDData_t cn_broadcast_data {};
 
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
@@ -61,11 +65,14 @@ void setup()
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
     g.init();
+#if AP_DRONECAN_ENABLED
+    cn_mode_active = g.rid_profile == 1;
+#endif
 
     led.set_state(Led::LedState::INIT);
     led.update();
 
-    if (g.webserver_enable) {
+    if (g.webserver_enable || cn_mode_active) {
         // need WiFi for web server
         wifi.init();
     }
@@ -361,6 +368,51 @@ static void set_data(Transport &t)
 
 static uint8_t loop_counter = 0;
 
+// This path deliberately does not call set_data()/Transport::arm_status_check:
+// those use shared ODID/MAVLink state and different required fields.
+static void update_cn(uint32_t now_ms)
+{
+#if AP_DRONECAN_ENABLED
+    const bool radio_ready = wifi.init();
+    if (wifi.management_ready()) webif.update();
+    now_ms = millis();
+    static bool scheduled = false;
+    static uint32_t last_update_ms = 0;
+    if (scheduled && now_ms - last_update_ms < 500) {
+        led.update();
+        return;
+    }
+    scheduled = true;
+    last_update_ms = now_ms;
+    const CNConfig config {g.cn_uas_id, g.cn_uin, g.cn_wifi_id, g.cn_class, g.cn_can_node};
+    CNData &input = dronecan.china_data();
+    bool prepared = input.prepare(config, now_ms, cn_broadcast_data);
+    cn_status_reason = input.reason();
+    uint8_t payload[128];
+    uint8_t identifier[4];
+    size_t length = 0;
+    if (!prepared) {
+        if (!wifi.clear_cn()) cn_status_reason = "CN WiFi cleanup failed";
+    } else if (!radio_ready) {
+        cn_status_reason = "CN WiFi unavailable";
+    } else if (CN46750_RID_Encode(&cn_broadcast_data, payload, sizeof(payload), &length) != RID_OK ||
+               !CNData::parse_wifi_id(config.wifi_id, identifier)) {
+        cn_status_reason = "CN encoding failed";
+        if (!wifi.clear_cn()) cn_status_reason = "CN WiFi cleanup failed";
+    } else if (!wifi.transmit_cn(payload, length, identifier)) {
+        cn_status_reason = "CN WiFi transmit failed";
+    }
+    if (cn_status_reason != nullptr) {
+        cn_broadcast_data.op_status = (cn_broadcast_data.op_status == OP_STATUS_EMERGENCY ||
+                                        cn_broadcast_data.op_status == OP_STATUS_FAIL_EMERGENCY) ?
+                                       OP_STATUS_FAIL_EMERGENCY : OP_STATUS_FAIL_NORMAL;
+    }
+    status_reason = cn_status_reason == nullptr ? "" : cn_status_reason;
+    led.set_state(cn_status_reason == nullptr ? Led::LedState::ARM_OK : Led::LedState::ARM_FAIL);
+    led.update();
+#endif
+}
+
 void loop()
 {
 #if AP_MAVLINK_ENABLED
@@ -372,6 +424,12 @@ void loop()
 #endif
 
     const uint32_t now_ms = millis();
+
+    if (cn_mode_active) {
+        update_cn(now_ms);
+        delay(1);
+        return;
+    }
 
     // the transports have common static data, so we can just use the
     // first for status

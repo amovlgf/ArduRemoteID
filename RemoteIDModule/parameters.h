@@ -10,6 +10,7 @@
 #define PARAM_FLAG_NONE 0
 #define PARAM_FLAG_PASSWORD (1U<<0)
 #define PARAM_FLAG_HIDDEN (1U<<1)
+#define PARAM_FLAG_CAN_ONLY (1U<<2)
 
 class Parameters {
 public:
@@ -41,8 +42,14 @@ public:
     uint8_t wifi_channel = 6;
     uint8_t to_factory_defaults = 0;
     uint8_t options;
+    uint8_t rid_profile;
+    uint8_t cn_can_node;
+    uint8_t cn_class;
+    char cn_uas_id[21] = "";
+    char cn_uin[21] = "";
+    char cn_wifi_id[21] = "";
     struct {
-        char b64_key[64];
+        char b64_key[65]; // CHAR64 storage includes its terminating NUL.
     } public_keys[MAX_PUBLIC_KEYS];
 
     enum class ParamType {
@@ -93,7 +100,7 @@ public:
     bool set_by_name_uint8(const char *name, uint8_t v);
     bool set_by_name_int8(const char *name, int8_t v);
     bool set_by_name_char64(const char *name, const char *s);
-    bool set_by_name_string(const char *name, const char *s);
+    bool set_by_name_string(const char *name, const char *s, bool from_can = false);
 
     /*
       return a public key

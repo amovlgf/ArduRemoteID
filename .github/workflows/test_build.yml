@@ -29,6 +29,11 @@ jobs:
           make setup
           make all
 
+      - name: Test China payload, CAN adapter and OTA compatibility
+        run: |
+          python3 -m pip install pymonocypher==3.1.3.2 dronecan
+          bash scripts/test_cn.sh
+
       - name: Check build files
         id: check_files
         uses: andstor/file-existence-action@v1

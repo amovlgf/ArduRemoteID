@@ -39,7 +39,11 @@ function page_fill_json_html(json) {
     for (var v in json) {
         var element = document.getElementById(v);
         if (element) {
-            element.innerHTML = json[v];
+            if (v.indexOf("CN:") === 0) {
+                element.textContent = json[v];
+            } else {
+                element.innerHTML = json[v];
+            }
         } else if (v == "STATUS:BOARD_ID") {
 	    if(typeof page_fill_json_html.run_once == 'undefined' ) {
 		//run this code only once to avoid updating these fields
