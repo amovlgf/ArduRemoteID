@@ -1,5 +1,11 @@
 # AMOV_RID：CAN 国标广播实验固件与 OTA 教程
 
+> AMOV 当前签名激活版本请先阅读 [RID_ACTIVATION.md](RID_ACTIVATION.md)。
+> 下文是此前 CN 实验版的历史配置/交付记录。当前 AMOV 固定 CN 模式，
+> CN_UAS_ID/CN_UIN/CN_CLASS 改为只读；必须先通过网页上传签名授权包并在地面冷上电生效，
+> 再配置 CN_CAN_NODE/CN_WIFI_ID。旧发布包路径不代表本次新构建产物。
+
+
 本版实现 **DroneCAN 输入 → GB 46750—2025 必选字段编码 → Wi-Fi Beacon**。
 串口/MAVLink 输入、蓝牙国标广播、网络 RID、120 小时存储和飞控处置不在本版范围。
 

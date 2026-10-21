@@ -1,3 +1,4 @@
+#include "activation_service.h"
 /*
   DroneCAN class for handling OpenDroneID messages
   with thanks to David Buzz for ArduPilot ESP32 HAL
@@ -116,7 +117,8 @@ void DroneCAN::arm_status_send(void)
     uint8_t buffer[DRONECAN_REMOTEID_ARMSTATUS_MAX_SIZE];
     dronecan_remoteid_ArmStatus arm_status {};
 
-    const char *failure = cn_mode_active ? cn_status_reason : parse_fail;
+    const char *failure = ActivationService::failure();
+    if (failure == nullptr) failure = cn_mode_active ? cn_status_reason : parse_fail;
     const uint8_t status = failure==nullptr? MAV_ODID_ARM_STATUS_GOOD_TO_ARM:MAV_ODID_ARM_STATUS_PRE_ARM_FAIL_GENERIC;
     const char *reason = failure==nullptr?"":failure;
 
@@ -613,6 +615,32 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
     }
 
     uavcan_protocol_param_GetSetResponse pkt {};
+
+    // Virtual identity parameters are always readable, including when locked
+    // or unactivated. A GetSet write returns the effective read-only value.
+    if (req.name.len > 0 && req.name.len <= PARAM_NAME_MAX_LEN) {
+        char name[PARAM_NAME_MAX_LEN+1] {};
+        memcpy(name,req.name.data,req.name.len);
+        rid_activation::ParamValue value;
+        if (rid_activation::get_parameter(ActivationService::snapshot(),name,value)) {
+            pkt.name.len=req.name.len;
+            memcpy(pkt.name.data,req.name.data,req.name.len);
+            if (value.is_string) {
+                pkt.value.union_tag=UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE;
+                pkt.value.string_value.len=strlen(value.string);
+                memcpy(pkt.value.string_value.data,value.string,pkt.value.string_value.len);
+            } else {
+                pkt.value.union_tag=UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
+                pkt.value.integer_value=value.integer;
+            }
+            uint8_t encoded[UAVCAN_PROTOCOL_PARAM_GETSET_RESPONSE_MAX_SIZE] {};
+            const uint16_t length=uavcan_protocol_param_GetSetResponse_encode(&pkt,encoded);
+            canardRequestOrRespond(ins,transfer->source_node_id,UAVCAN_PROTOCOL_PARAM_GETSET_SIGNATURE,
+                UAVCAN_PROTOCOL_PARAM_GETSET_ID,&transfer->transfer_id,transfer->priority,
+                CanardResponse,encoded,length);
+            return;
+        }
+    }
 
     const Parameters::Param *vp = nullptr;
 

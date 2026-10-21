@@ -1,5 +1,11 @@
 # 无 GNSS 模块时的 PX4 → CAN → RID 台架联调
 
+> AMOV 当前签名激活版本请先阅读 [RID_ACTIVATION.md](RID_ACTIVATION.md)。
+> 下文是此前 CN 实验版的历史配置/交付记录。当前 AMOV 固定 CN 模式，
+> CN_UAS_ID/CN_UIN/CN_CLASS 改为只读；必须先通过网页上传签名授权包并在地面冷上电生效，
+> 再配置 CN_CAN_NODE/CN_WIFI_ID。旧发布包路径不代表本次新构建产物。
+
+
 本步骤承接已启用的中国实验模式：RID 节点125、`CN_CAN_NODE=1`，
 产品码 `TESTCN00000000000001`，实验广播标识 `02000001`。
 测试链路为：电脑 USB → PX4 模拟 GNSS / System → 飞控 CAN1 → RID → Wi-Fi。

@@ -124,7 +124,7 @@
   <p>
 
   <script>
-    $('form').submit(function(e) {
+    $('#upload_form').submit(function(e) {
         e.preventDefault();
         var form = $('#upload_form')[0];
         var data = new FormData(form);
@@ -173,5 +173,60 @@
         $('#progress').html(''); //disable progress text after loading the page
     });
     </script>
+  <fieldset>
+    <legend>整机身份与激活 / Aircraft activation</legend>
+    <p id="activation-build"></p>
+    <p>设备 UID：<span id="activation-uid"></span>；状态：<span id="activation-state"></span></p>
+    <p>生效版本：<span id="activation-rev"></span>；待生效版本：<span id="activation-pending"></span></p>
+    <p>产品识别码：<span id="activation-product"></span></p>
+    <p>完整登记号：<span id="activation-registration"></span></p>
+    <p>授权包验证通过后仅暂存。请在地面确认安全，人工断电后重新上电使其生效。
+       首次激活前不发送业务广播；更新授权前当前身份继续有效。此页面不会自动重启。</p>
+    <form id="activation-form">
+      <input id="activation-file" type="file" accept=".act,application/octet-stream" required>
+      <button type="submit">上传签名授权包</button>
+    </form>
+    <p id="activation-result"></p>
+  </fieldset>
+  <script>
+    async function pollActivation() {
+      try {
+        const response = await fetch('/ajax/activation.json', {cache: 'no-store'});
+        const state = await response.json();
+        const put = (id, value) => { document.getElementById(id).textContent = value; };
+        put('activation-build', state.test_build ? '测试固件：使用公开测试密钥，禁止用于生产' :
+          (state.trust_roots ? '生产构建：公司激活公钥已配置' : '生产构建：尚未配置公司激活公钥，拒绝所有授权包'));
+        put('activation-uid', state.uid);
+        put('activation-state', ['未激活', '已激活', '授权记录无效'][state.state] || '未知');
+        put('activation-rev', state.revision);
+        put('activation-pending', state.pending);
+        put('activation-product', state.uas_id);
+        put('activation-registration', state.registration || '未提供');
+        put('activation-result', state.busy ? '正在验证并暂存…' :
+          (state.result_name === 'PENDING_REBOOT' ? '已验证并暂存；人工断电重启后生效' : state.result_name));
+      } catch (_) { document.getElementById('activation-result').textContent = '连接中断，重新连接后查看结果'; }
+    }
+    document.getElementById('activation-form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const file = document.getElementById('activation-file').files[0];
+      if (!file || file.size !== 204) { alert('授权包必须为 204 字节'); return; }
+      const data = new FormData();
+      data.append('authorization', file);
+      const button = this.querySelector('button');
+      button.disabled = true;
+      try {
+        const response = await fetch('/activation', {method: 'POST', body: data});
+        if (response.status !== 202) {
+          document.getElementById('activation-result').textContent = '上传被拒绝：' + await response.text();
+        } else {
+          document.getElementById('activation-result').textContent = '已接收，等待验证；尚未生效';
+          setTimeout(pollActivation, 700);
+        }
+      } catch (_) { document.getElementById('activation-result').textContent = '上传中断，请重新连接后查询结果'; }
+      button.disabled = false;
+    });
+    pollActivation();
+    setInterval(pollActivation, 1500);
+  </script>
 </body>
 </html>

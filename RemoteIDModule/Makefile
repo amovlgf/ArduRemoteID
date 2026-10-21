@@ -1,4 +1,5 @@
 # Makefile using arduino-cli
+.DEFAULT_GOAL := all
 
 ARDUINO_HOME=$(HOME)/.arduino15
 ESP32_VER=2.0.3
@@ -9,6 +10,14 @@ ESP32_FQBN=esp32:esp32:$(CHIP)
 SERDEV := $(wildcard /dev/serial/by-id/usb-Espressif_*)
 ARDUINO_CLI=../bin/arduino-cli
 APP_PARTITION_SIZE=2031616
+EXTRA_BUILD_FLAGS ?=
+
+# The test target has an unmistakable, separate output name and public test root.
+.PHONY: amov-rid-test
+amov-rid-test:
+	$(MAKE) CHIP=esp32c3 BOARD_DEFINE=AMOV_RID EXTRA_BUILD_FLAGS="-DRID_ACTIVATION_TEST_KEYS" ArduRemoteID-AMOV_RID_TEST.bin
+
+BOARD_DEFINE ?= $*
 
 # ensure python tools are in $PATH
 export PATH := $(HOME)/.local/bin:$(PATH)
@@ -75,7 +84,7 @@ ArduRemoteID-%.bin: gitversion *.cpp *.ino *.h romfs_files.h
 	@echo "Building $* on $(CHIP)"
 	@BUILD_FLAGS="-DBOARD_$*"
 	@rm -rf build build-$*
-	@$(ARDUINO_CLI) compile -b esp32:esp32:$(CHIP) --libraries ../libraries --export-binaries --build-property build.extra_flags="-DBOARD_$* -DESP32" --build-property upload.maximum_size=$(APP_PARTITION_SIZE)
+	@$(ARDUINO_CLI) compile -b esp32:esp32:$(CHIP) --libraries ../libraries --export-binaries --build-property build.extra_flags="-DBOARD_$(BOARD_DEFINE) -DESP32 $(EXTRA_BUILD_FLAGS)" --build-property upload.maximum_size=$(APP_PARTITION_SIZE)
 	@cp build/esp32.esp32.$(CHIP)/RemoteIDModule.ino.bin ArduRemoteID_$*_OTA.bin
 	@echo "Merging $*"
 	@python3 $(ESPTOOL) --chip $(CHIP) merge_bin -o ArduRemoteID-$*.bin --flash_size 4MB 0x0 build/esp32.esp32.$(CHIP)/RemoteIDModule.ino.bootloader.bin 0x8000 build/esp32.esp32.$(CHIP)/RemoteIDModule.ino.partitions.bin 0xe000 $(ESP32_TOOLS)/partitions/boot_app0.bin 0x10000 build/esp32.esp32.$(CHIP)/RemoteIDModule.ino.bin

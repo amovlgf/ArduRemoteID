@@ -1,5 +1,11 @@
 # CAN → 中国 RID → Wi-Fi 测试说明
 
+> AMOV 当前签名激活版本请先阅读 [RID_ACTIVATION.md](RID_ACTIVATION.md)。
+> 下文是此前 CN 实验版的历史配置/交付记录。当前 AMOV 固定 CN 模式，
+> CN_UAS_ID/CN_UIN/CN_CLASS 改为只读；必须先通过网页上传签名授权包并在地面冷上电生效，
+> 再配置 CN_CAN_NODE/CN_WIFI_ID。旧发布包路径不代表本次新构建产物。
+
+
 本版只提供广播载荷、CAN适配及实验Wi-Fi封装。通过软件测试不等于真实设备OTA、无线互通、
 导航精度、射频或整机合规已经验证。每次交付的实际结果保存在 `artifacts/cn-can-wifi/TEST_RESULTS.md`。
 

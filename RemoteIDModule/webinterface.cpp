@@ -10,8 +10,24 @@
 #include "romfs.h"
 #include "check_firmware.h"
 #include "status.h"
+#include "activation_service.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 static WebServer server(80);
+// Only the network task owns server/OTA/upload state. The flight/CAN loop
+// publishes a bounded status copy; it never waits for a slow HTTP client.
+namespace {
+struct StatusPacket { char json[8192]; };
+QueueHandle_t status_queue=nullptr;
+StatusPacket received_status={"{}"};
+uint8_t activation_upload[rid_activation::PACKAGE_SIZE] {};
+size_t activation_received=0;
+bool activation_failed=true;
+bool activation_finished=false;
+}
+
 
 class ESPOTAUploadBackend : public OTAUpload::Backend {
 public:
@@ -111,7 +127,8 @@ class AJAX_Handler : public RequestHandler
         if (requestUri != "/ajax/status.json") {
             return false;
         }
-        server.send(200, "application/json", status_json());
+        if (status_queue) xQueueReceive(status_queue,&received_status,0);
+        server.send(200, "application/json", received_status.json);
         return true;
     }
 
@@ -122,11 +139,50 @@ class AJAX_Handler : public RequestHandler
  */
 void WebInterface::init(void)
 {
-    Serial.printf("WAP start %s %s\n", g.wifi_ssid, g.wifi_password);
-    IPAddress myIP = WiFi.softAPIP();
+    Serial.printf("WAP management started\n");
 
     server.addHandler( &AJAX_Handler );
     server.addHandler( &ROMFS_Handler );
+
+    server.on("/ajax/activation.json",HTTP_GET,[]() {
+        server.sendHeader("Cache-Control","no-store");
+        server.send(200,"application/json",ActivationService::status_json());
+    });
+    server.on("/activation",HTTP_POST,[]() {
+        server.sendHeader("Connection","close");
+        if (activation_failed || !activation_finished ||
+            activation_received!=rid_activation::PACKAGE_SIZE) {
+            server.send(400,"application/json","{\"error\":\"INVALID_FORMAT\"}");
+        } else if (!ActivationService::submit(activation_upload,activation_received)) {
+            server.send(503,"application/json","{\"error\":\"BUSY_OR_UNAVAILABLE\"}");
+        } else {
+            // Accepted is receipt only. Poll for durable PENDING_REBOOT or error.
+            server.send(202,"application/json","{\"accepted\":true}");
+        }
+        activation_failed=true;
+        activation_finished=false;
+        activation_received=0;
+    },[]() {
+        HTTPUpload &upload=server.upload();
+        if (upload.status==UPLOAD_FILE_START) {
+            activation_received=0;
+            activation_failed=false;
+            activation_finished=false;
+        } else if (upload.status==UPLOAD_FILE_WRITE) {
+            if (activation_failed || upload.currentSize>sizeof(activation_upload)-activation_received) {
+                activation_failed=true;
+            } else {
+                memcpy(activation_upload+activation_received,upload.buf,upload.currentSize);
+                activation_received+=upload.currentSize;
+            }
+        } else if (upload.status==UPLOAD_FILE_END) {
+            activation_finished=!activation_failed && activation_received==sizeof(activation_upload) &&
+                                upload.totalSize==sizeof(activation_upload);
+        } else if (upload.status==UPLOAD_FILE_ABORTED) {
+            activation_failed=true;
+            activation_finished=false;
+        }
+    });
 
     /*handling uploading firmware file */
     server.on("/update", HTTP_POST, [this]() {
@@ -161,9 +217,31 @@ void WebInterface::init(void)
 
 void WebInterface::update()
 {
+    static StatusPacket outgoing;
+    static uint32_t last_status_ms=0;
     if (!initialised) {
-        init();
-        initialised = true;
+        status_queue=xQueueCreate(1,sizeof(StatusPacket));
+        if (status_queue==nullptr) return;
+        const BaseType_t created=xTaskCreate([](void *context) {
+            auto *self=static_cast<WebInterface *>(context);
+            self->init();
+            for (;;) {
+                server.handleClient();
+                ActivationService::process();
+                vTaskDelay(pdMS_TO_TICKS(2));
+            }
+        },"rid-web",12288,this,1,nullptr);
+        if (created!=pdPASS) { vQueueDelete(status_queue); status_queue=nullptr; return; }
+        initialised=true;
     }
-    server.handleClient();
+    const uint32_t now=millis();
+    if (now-last_status_ms<500) return;
+    last_status_ms=now;
+    const String json=status_json();
+    if (json.length()>=sizeof(outgoing.json)) {
+        strcpy(outgoing.json,"{}");
+    } else {
+        memcpy(outgoing.json,json.c_str(),json.length()+1);
+    }
+    xQueueOverwrite(status_queue,&outgoing);
 }

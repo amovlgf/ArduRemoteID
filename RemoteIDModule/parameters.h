@@ -37,8 +37,13 @@ public:
     uint8_t done_init;
     uint8_t webserver_enable;
     uint8_t mavlink_sysid;
+#ifdef BOARD_AMOV_RID
+    char wifi_ssid[21] = "B950_RID";
+    char wifi_password[21] = "987654321";
+#else
     char wifi_ssid[21] = "";
     char wifi_password[21] = "ArduRemoteID";
+#endif
     uint8_t wifi_channel = 6;
     uint8_t to_factory_defaults = 0;
     uint8_t options;

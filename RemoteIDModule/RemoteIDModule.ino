@@ -25,6 +25,7 @@
 #include "efuse.h"
 #include "led.h"
 #include "CNData.h"
+#include "activation_service.h"
 
 
 #if AP_DRONECAN_ENABLED
@@ -61,10 +62,16 @@ static bool pfst_check_ok = false;
  */
 void setup()
 {
-    // disable brownout checking
+    // Keep reset-cause detection on AMOV: a brownout must not apply pending
+    // authorization as if it were an intentional cold boot.
+#ifndef BOARD_AMOV_RID
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+#endif
 
     g.init();
+    ActivationService::init();
+    // The AMOV authorization grants the China business profile only.
+    if (ActivationService::required()) g.rid_profile = 1;
 #if AP_DRONECAN_ENABLED
     cn_mode_active = g.rid_profile == 1;
 #endif
@@ -384,7 +391,21 @@ static void update_cn(uint32_t now_ms)
     }
     scheduled = true;
     last_update_ms = now_ms;
-    const CNConfig config {g.cn_uas_id, g.cn_uin, g.cn_wifi_id, g.cn_class, g.cn_can_node};
+    if (!ActivationService::business_allowed()) {
+        wifi.clear_cn();
+        cn_status_reason = ActivationService::failure();
+        status_reason = cn_status_reason;
+        led.set_state(Led::LedState::ARM_FAIL);
+        led.update();
+        return;
+    }
+    const auto identity = ActivationService::snapshot().identity;
+    const CNConfig config {
+        ActivationService::required() ? identity.product : g.cn_uas_id,
+        ActivationService::required() ? identity.uin : g.cn_uin,
+        g.cn_wifi_id,
+        ActivationService::required() ? identity.aircraft_class : g.cn_class,
+        g.cn_can_node};
     CNData &input = dronecan.china_data();
     bool prepared = input.prepare(config, now_ms, cn_broadcast_data);
     cn_status_reason = input.reason();

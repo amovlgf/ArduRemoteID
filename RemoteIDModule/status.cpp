@@ -19,10 +19,21 @@ typedef struct {
     String value;
 } json_table_t;
 
-static String escape_string(String s)
+static String escape_string(const String &s)
 {
-    s.replace("\"", "");
-    return s;
+    String escaped;
+    for (size_t i = 0; i < s.length(); ++i) {
+        const uint8_t value = uint8_t(s[i]);
+        if (value == '"' || value == '\\') escaped += '\\';
+        if (value < 0x20) {
+            char code[7];
+            snprintf(code, sizeof(code), "\\u%04x", unsigned(value));
+            escaped += code;
+        } else {
+            escaped += char(value);
+        }
+    }
+    return escaped;
 }
 
 /*

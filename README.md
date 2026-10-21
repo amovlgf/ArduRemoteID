@@ -165,6 +165,9 @@ MissionPlanner CAN tool.
 
 The default SSID is RID_xxxxxxxx where xxxxxxxx is the factory WiFi
 MAC address of the board. The default password is ArduRemoteID.
+AMOV_RID, including AMOV_RID_TEST, instead defaults to SSID `B950_RID`
+and password `987654321`. Saved WiFi parameters take precedence over these
+defaults when an update preserves NVS.
 
 The web server has a secure firmware update mechanism which will only
 allow a properly signed firmware with a signature corresponding to one

@@ -1,3 +1,4 @@
+#include "activation_service.h"
 #include "options.h"
 #include <Arduino.h>
 #include "parameters.h"
@@ -154,13 +155,15 @@ const Parameters::Param *Parameters::find_by_index_float(uint16_t index)
 
 void Parameters::Param::set_uint8(uint8_t v) const
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return;
     auto *p = (uint8_t *)ptr;
     *p = v;
     nvs_set_u8(handle, name, *p);
     if (strcmp(name, "TO_DEFAULTS") == 0) {
         if (v == 1) {
-            nvs_flash_erase();
-            esp_restart();
+            // Ordinary defaults never erase the signed active identity.
+            if (ActivationService::clear_pending_for_defaults() &&
+                nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
         }
     }
 }
@@ -197,6 +200,7 @@ void Parameters::Param::set_float(float v) const
 
 void Parameters::Param::set_char20(const char *v) const
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return;
     if (min_len > 0 && strlen(v) < min_len) {
         return;
     }
@@ -207,6 +211,7 @@ void Parameters::Param::set_char20(const char *v) const
 
 void Parameters::Param::set_char64(const char *v) const
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return;
     if (min_len > 0 && strlen(v) < min_len) {
         return;
     }
@@ -377,9 +382,9 @@ void Parameters::init(void)
 
     }
     if (g.to_factory_defaults == 1) {
-        //should not happen, but in case the parameter is still set to 1, erase flash and reboot
-        nvs_flash_erase();
-        esp_restart();
+        // Preserve authorization even when recovering an interrupted reset.
+        if (ActivationService::clear_pending_for_defaults() &&
+            nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
     }
 
     if (g.done_init == 0) {
@@ -413,6 +418,7 @@ bool Parameters::have_basic_id_2_info(void) const
 
 bool Parameters::set_by_name_uint8(const char *name, uint8_t v)
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return false;
     const auto *f = find(name);
     if (!f) {
         return false;
@@ -423,6 +429,7 @@ bool Parameters::set_by_name_uint8(const char *name, uint8_t v)
 
 bool Parameters::set_by_name_int8(const char *name, int8_t v)
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return false;
     const auto *f = find(name);
     if (!f) {
         return false;
@@ -432,6 +439,7 @@ bool Parameters::set_by_name_int8(const char *name, int8_t v)
 
 bool Parameters::set_by_name_char64(const char *name, const char *s)
 {
+    if (ActivationService::required() && rid_activation::protected_parameter(name)) return false;
     const auto *f = find(name);
     if (!f) {
         return false;
@@ -442,6 +450,7 @@ bool Parameters::set_by_name_char64(const char *name, const char *s)
 
 bool Parameters::set_by_name_string(const char *name, const char *s, bool from_can)
 {
+    if (ActivationService::required() && (rid_activation::protected_parameter(name) || strcmp(name, "RID_PROFILE") == 0)) return false;
     const auto *f = find(name);
     if (!f) {
         return false;
