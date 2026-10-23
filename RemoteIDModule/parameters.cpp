@@ -161,9 +161,8 @@ void Parameters::Param::set_uint8(uint8_t v) const
     nvs_set_u8(handle, name, *p);
     if (strcmp(name, "TO_DEFAULTS") == 0) {
         if (v == 1) {
-            // Ordinary defaults never erase the signed active identity.
-            if (ActivationService::clear_pending_for_defaults() &&
-                nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
+            // The handle belongs only to ordinary settings, not factory identity.
+            if (nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
         }
     }
 }
@@ -382,9 +381,8 @@ void Parameters::init(void)
 
     }
     if (g.to_factory_defaults == 1) {
-        // Preserve authorization even when recovering an interrupted reset.
-        if (ActivationService::clear_pending_for_defaults() &&
-            nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
+        // Preserve factory identity and activation when recovering a reset.
+        if (nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK) esp_restart();
     }
 
     if (g.done_init == 0) {

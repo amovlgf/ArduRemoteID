@@ -5,6 +5,7 @@
  */
 
 #include "WiFi_TX.h"
+#include "wifi_network.h"
 #include <esp_wifi.h>
 #include <WiFi.h>
 #include <esp_system.h>
@@ -14,13 +15,14 @@
 
 bool WiFi_TX::init(void)
 {
-    if (initialised) {
-        return true;
-    }
     const uint32_t now = millis();
-    if (init_attempted && now - last_init_attempt_ms < 1000) return false;
+    // Check successful initializations too: an AP/DHCP outage must not leave
+    // the cached ready flags set forever. Never restart a healthy connection.
+    if (init_attempted && now - last_init_attempt_ms < 1000) return initialised;
     init_attempted = true;
     last_init_attempt_ms = now;
+
+    if (reset_pending && !reset_ap()) return false;
 
     //use a local MAC address to avoid tracking transponders based on their MAC address
     if (!mac_ready) {
@@ -30,18 +32,69 @@ bool WiFi_TX::init(void)
         if (esp_base_mac_addr_set(WiFi_mac_addr) != ESP_OK) return false;
         mac_ready = true;
     }
-    if (!ap_ready) {
-        // CN faults must not remove the field-update path. Keep stored settings.
-        ap_ready = WiFi.softAP(g.wifi_ssid, g.wifi_password, g.wifi_channel,
-                              false, (g.webserver_enable || cn_mode_active) ? 1 : 0);
-        if (!ap_ready) return false;
+    if ((WiFi.getMode() & WIFI_AP) == 0) {
+        if (ap_started && !reset_ap()) return false;
+        initialised = false;
+        ap_started = false;
+        ap_ready = false;
+        ip_configured = false;
     }
-    if (esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20) != ESP_OK) {
+    if (!ap_started) {
+        // CN faults must not remove the field-update path. Keep stored settings.
+        if (!WiFi.softAP(g.wifi_ssid, g.wifi_password, g.wifi_channel,
+                         false, (g.webserver_enable || cn_mode_active) ? 4 : 0)) {
+            Serial.printf("WiFi AP start failed; retrying\n");
+            reset_ap();
+            return false;
+        }
+        ap_started = true;
+        ap_start_ms = now;
+        Serial.printf("WiFi AP starting on channel %u\n", unsigned(g.wifi_channel));
+    }
+
+    if (!WiFiNetwork::ap_up()) {
+        initialised = false;
+        ap_ready = false;
+        // AP_START is asynchronous. Give it time to complete before recovery.
+        if (now - ap_start_ms >= 5000) {
+            Serial.printf("WiFi AP interface unavailable; restarting\n");
+            reset_ap();
+        }
         return false;
     }
 
-    if (esp_wifi_set_max_tx_power(dBm_to_tx_power(g.wifi_power)) != ESP_OK) return false;
-    initialised = true;
+    if (!ip_configured || !WiFiNetwork::ready()) {
+        const IPAddress address(192, 168, 4, 1);
+        // In Arduino 2.0.3 this also configures the lease range and starts DHCP.
+        // Repair DHCP without disconnecting clients or resetting the radio.
+        ip_configured = WiFi.softAPConfig(address, address, IPAddress(255, 255, 255, 0));
+        if (!ip_configured) Serial.printf("WiFi AP IP/DHCP setup failed; retrying\n");
+    }
+    const bool network_ready = ip_configured && WiFiNetwork::ready();
+    if (network_ready && !ap_ready) Serial.printf("WiFi AP ready at 192.168.4.1 (DHCP active)\n");
+    ap_ready = network_ready;
+
+    // Radio configuration failures must not remove the management interface;
+    // likewise, DHCP recovery must not suspend an otherwise working broadcast.
+    if (!initialised) {
+        initialised = esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20) == ESP_OK &&
+                      esp_wifi_set_max_tx_power(dBm_to_tx_power(g.wifi_power)) == ESP_OK;
+        if (!initialised) Serial.printf("WiFi radio setup failed; retrying\n");
+    }
+    return initialised;
+}
+
+bool WiFi_TX::reset_ap()
+{
+    initialised = false;
+    ap_ready = false;
+    reset_pending = true;
+    if (!WiFi.mode(WIFI_OFF)) return false;
+    reset_pending = false;
+    ap_started = false;
+    ip_configured = false;
+    cn_beacon_active = false;
+    cn_probe_active = false;
     return true;
 }
 
@@ -160,12 +213,7 @@ bool WiFi_TX::clear_cn(void)
     if (!ok) {
         // A stale normal beacon is worse than an explicit radio outage. Reset
         // the driver, then retry the same management AP after a bounded delay.
-        if (WiFi.mode(WIFI_OFF)) {
-            cn_beacon_active = false;
-            cn_probe_active = false;
-        }
-        initialised = false;
-        ap_ready = false;
+        reset_ap();
         init_attempted = true;
         last_init_attempt_ms = millis();
     }

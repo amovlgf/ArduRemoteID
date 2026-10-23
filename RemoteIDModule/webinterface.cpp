@@ -11,21 +11,24 @@
 #include "check_firmware.h"
 #include "status.h"
 #include "activation_service.h"
+#include "management_service.h"
+#include "wifi_network.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-static WebServer server(80);
 // Only the network task owns server/OTA/upload state. The flight/CAN loop
 // publishes a bounded status copy; it never waits for a slow HTTP client.
 namespace {
+class ManagementWebServer : public WebServer {
+public:
+    ManagementWebServer() : WebServer(80) {}
+    bool listening() { return bool(_server); }
+};
+ManagementWebServer server;
 struct StatusPacket { char json[8192]; };
 QueueHandle_t status_queue=nullptr;
 StatusPacket received_status={"{}"};
-uint8_t activation_upload[rid_activation::PACKAGE_SIZE] {};
-size_t activation_received=0;
-bool activation_failed=true;
-bool activation_finished=false;
 }
 
 
@@ -148,42 +151,6 @@ void WebInterface::init(void)
         server.sendHeader("Cache-Control","no-store");
         server.send(200,"application/json",ActivationService::status_json());
     });
-    server.on("/activation",HTTP_POST,[]() {
-        server.sendHeader("Connection","close");
-        if (activation_failed || !activation_finished ||
-            activation_received!=rid_activation::PACKAGE_SIZE) {
-            server.send(400,"application/json","{\"error\":\"INVALID_FORMAT\"}");
-        } else if (!ActivationService::submit(activation_upload,activation_received)) {
-            server.send(503,"application/json","{\"error\":\"BUSY_OR_UNAVAILABLE\"}");
-        } else {
-            // Accepted is receipt only. Poll for durable PENDING_REBOOT or error.
-            server.send(202,"application/json","{\"accepted\":true}");
-        }
-        activation_failed=true;
-        activation_finished=false;
-        activation_received=0;
-    },[]() {
-        HTTPUpload &upload=server.upload();
-        if (upload.status==UPLOAD_FILE_START) {
-            activation_received=0;
-            activation_failed=false;
-            activation_finished=false;
-        } else if (upload.status==UPLOAD_FILE_WRITE) {
-            if (activation_failed || upload.currentSize>sizeof(activation_upload)-activation_received) {
-                activation_failed=true;
-            } else {
-                memcpy(activation_upload+activation_received,upload.buf,upload.currentSize);
-                activation_received+=upload.currentSize;
-            }
-        } else if (upload.status==UPLOAD_FILE_END) {
-            activation_finished=!activation_failed && activation_received==sizeof(activation_upload) &&
-                                upload.totalSize==sizeof(activation_upload);
-        } else if (upload.status==UPLOAD_FILE_ABORTED) {
-            activation_failed=true;
-            activation_finished=false;
-        }
-    });
-
     /*handling uploading firmware file */
     server.on("/update", HTTP_POST, [this]() {
         server.sendHeader("Connection", "close");
@@ -211,8 +178,6 @@ void WebInterface::init(void)
             ota_upload.fail(ota_backend);
         }
     });
-    Serial.printf("WAP started\n");
-    server.begin();
 }
 
 void WebInterface::update()
@@ -225,9 +190,31 @@ void WebInterface::update()
         const BaseType_t created=xTaskCreate([](void *context) {
             auto *self=static_cast<WebInterface *>(context);
             self->init();
+            bool network_ready=false;
+            bool network_checked=false;
+            uint32_t last_network_check_ms=0;
             for (;;) {
-                server.handleClient();
-                ActivationService::process();
+                const uint32_t now=millis();
+                // Address checks synchronize with TCP/IP; poll once per second.
+                if (!network_checked || now-last_network_check_ms>=1000) {
+                    network_checked=true;
+                    last_network_check_ms=now;
+                    // Keep a static-address diagnostic path even if DHCP is down.
+                    const bool ready=WiFiNetwork::ap_up() && WiFiNetwork::address_ready();
+                    if (!ready && network_ready) {
+                        server.client().stop();
+                        server.stop();
+                    }
+                    network_ready=ready;
+                    if (network_ready && !server.listening()) {
+                        // begin() closes a socket left by a failed bind/listen.
+                        server.begin();
+                        Serial.printf(server.listening() ? "WAP HTTP listener started\n" :
+                                      "WAP HTTP listener failed; retrying\n");
+                    }
+                }
+                if (network_ready && server.listening()) server.handleClient();
+                ManagementService::process();
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
         },"rid-web",12288,this,1,nullptr);

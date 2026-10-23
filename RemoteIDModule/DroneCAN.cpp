@@ -1,14 +1,19 @@
 #include "activation_service.h"
+#include "management_service.h"
 /*
   DroneCAN class for handling OpenDroneID messages
   with thanks to David Buzz for ArduPilot ESP32 HAL
  */
 #include <Arduino.h>
 #include "board_config.h"
+#ifdef BOARD_AMOV_RID
+#include <amov.transport.DeviceManagement.h>
+#endif
 #include "version.h"
 #include <time.h>
 #include "DroneCAN.h"
 #include "parameters.h"
+#include "parameter_text.h"
 #include <stdarg.h>
 #include "util.h"
 #include "monocypher.h"
@@ -155,7 +160,13 @@ void DroneCAN::onTransferReceived(CanardInstance* ins,
     case UAVCAN_PROTOCOL_GETNODEINFO_ID:
         handle_get_node_info(ins, transfer);
         break;
+#ifdef BOARD_AMOV_RID
+    case AMOV_TRANSPORT_DEVICEMANAGEMENT_ID:
+        handle_management(ins, transfer);
+        break;
+#endif
     case UAVCAN_PROTOCOL_RESTARTNODE_ID:
+        if (ManagementService::busy()) break;
         Serial.printf("DroneCAN: restartNode\n");
         delay(20);
         esp_restart();
@@ -206,6 +217,12 @@ bool DroneCAN::shouldAcceptTransfer(const CanardInstance* ins,
 
 #define ACCEPT_ID(name) case name ## _ID: *out_data_type_signature = name ## _SIGNATURE; return true
     switch (data_type_id) {
+    #ifdef BOARD_AMOV_RID
+    case AMOV_TRANSPORT_DEVICEMANAGEMENT_ID:
+        if (!ActivationService::required() || transfer_type != CanardTransferTypeRequest || source_node_id == 0) return false;
+        *out_data_type_signature = AMOV_TRANSPORT_DEVICEMANAGEMENT_SIGNATURE;
+        return true;
+    #endif
         ACCEPT_ID(UAVCAN_PROTOCOL_GETNODEINFO);
         ACCEPT_ID(UAVCAN_PROTOCOL_RESTARTNODE);
         ACCEPT_ID(DRONECAN_REMOTEID_BASICID);
@@ -657,7 +674,9 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
     }
     if (vp != nullptr && req.name.len != 0 &&
         req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
-        if (g.lock_level > 0) {
+        if (ManagementService::busy()) {
+            can_printf("Management transaction busy");
+        } else if (g.lock_level > 0) {
             can_printf("Parameters locked");
         } else {
             // param set
@@ -708,8 +727,9 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
                 if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) {
                     return;
                 }
+                if (!ParameterText::valid(req.value.string_value.data, req.value.string_value.len, 20)) return;
                 char v[21] {};
-                strncpy(v, (const char *)&req.value.string_value.data[0], req.value.string_value.len);
+                memcpy(v, req.value.string_value.data, req.value.string_value.len);
                 if (vp->min_len > 0 && strlen(v) < vp->min_len) {
                     can_printf("%s too short - min %u", vp->name, vp->min_len);
                 } else {
@@ -721,8 +741,9 @@ void DroneCAN::handle_param_getset(CanardInstance* ins, CanardRxTransfer* transf
                 if (req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_STRING_VALUE) {
                     return;
                 }
+                if (!ParameterText::valid(req.value.string_value.data, req.value.string_value.len, 64)) return;
                 char v[65] {};
-                strncpy(v, (const char *)&req.value.string_value.data[0], req.value.string_value.len);
+                memcpy(v, req.value.string_value.data, req.value.string_value.len);
                 vp->set_char64(v);
                 break;
             }
@@ -826,6 +847,11 @@ void DroneCAN::handle_SecureCommand(CanardInstance* ins, CanardRxTransfer* trans
     reply.sequence = req.sequence;
     reply.operation = req.operation;
 
+    if (ManagementService::busy()) {
+        reply.result = DRONECAN_REMOTEID_SECURECOMMAND_RESPONSE_RESULT_TEMPORARILY_REJECTED;
+        goto send_reply;
+    }
+
     if (!check_signature(req.sig_length, req.data.len-req.sig_length,
                          req.sequence, req.operation, req.data.data)) {
         reply.result = DRONECAN_REMOTEID_SECURECOMMAND_RESPONSE_RESULT_DENIED;
@@ -851,10 +877,10 @@ void DroneCAN::handle_SecureCommand(CanardInstance* ins, CanardRxTransfer* trans
         char *command = (char *)req.data.data;
         while (data_len > 0) {
             uint8_t cmdlen = strlen(command);
-            Serial.printf("set_config %s", command);
             char *eq = strchr(command, '=');
             if (eq != nullptr) {
                 *eq = 0;
+                Serial.printf("set_config %s\n", command);
                 if (!g.set_by_name_string(command, eq+1, true)) {
                     reply.result = DRONECAN_REMOTEID_SECURECOMMAND_RESPONSE_RESULT_FAILED;
                 }
@@ -923,5 +949,22 @@ void xprintf(const char *fmt, ...)
     uint32_t n = vsnprintf(buffer, sizeof(buffer), fmt, ap);
     va_end(ap);
     Serial.printf("%s", buffer);
+}
+#endif
+
+#ifdef BOARD_AMOV_RID
+// PX4 only forwards this payload. Business rules and persistence belong to RID.
+void DroneCAN::handle_management(CanardInstance *ins,CanardRxTransfer *transfer)
+{
+    if(transfer->transfer_type!=CanardTransferTypeRequest) return;
+    amov_transport_DeviceManagementRequest request {};
+    if(amov_transport_DeviceManagementRequest_decode(transfer,&request)) return;
+    amov_transport_DeviceManagementResponse response {};
+    if(!ManagementService::handle(request.payload.data,request.payload.len,response.payload.data,sizeof(response.payload.data))) return;
+    response.payload.len=192;
+    uint8_t encoded[AMOV_TRANSPORT_DEVICEMANAGEMENT_RESPONSE_MAX_SIZE] {};
+    const auto length=amov_transport_DeviceManagementResponse_encode(&response,encoded);
+    canardRequestOrRespond(ins,transfer->source_node_id,AMOV_TRANSPORT_DEVICEMANAGEMENT_SIGNATURE,
+        AMOV_TRANSPORT_DEVICEMANAGEMENT_ID,&transfer->transfer_id,transfer->priority,CanardResponse,encoded,length);
 }
 #endif

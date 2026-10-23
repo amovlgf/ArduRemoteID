@@ -1,5 +1,6 @@
 #pragma once
 #include "activation.h"
+#include "platform_activation.h"
 #include <Arduino.h>
 
 namespace ActivationService {
@@ -8,10 +9,9 @@ void init();
 rid_activation::Snapshot snapshot();
 bool business_allowed();
 const char *failure();
-// One outstanding upload, copied bounded storage; never changes live identity.
-bool submit(const uint8_t *bytes, size_t size);
-// Only the low-priority web task calls this, outside HTTP callbacks.
-void process();
 String status_json();
-bool clear_pending_for_defaults();
+platform_activation::State platform_state();
+bool factory_provision_available();
+rid_activation::Result provision(const char sn[20], uint8_t aircraft_class);
+rid_activation::Result synchronize(const char sn[20], bool active, uint64_t transaction);
 }

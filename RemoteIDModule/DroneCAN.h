@@ -62,6 +62,9 @@ private:
     void handle_Location(CanardRxTransfer* transfer);
     void handle_param_getset(CanardInstance* ins, CanardRxTransfer* transfer);
     void handle_SecureCommand(CanardInstance* ins, CanardRxTransfer* transfer);
+#ifdef BOARD_AMOV_RID
+    void handle_management(CanardInstance* ins, CanardRxTransfer* transfer);
+#endif
 
     void can_printf(const char *fmt, ...);
 

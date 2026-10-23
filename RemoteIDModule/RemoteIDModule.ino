@@ -26,6 +26,7 @@
 #include "led.h"
 #include "CNData.h"
 #include "activation_service.h"
+#include "management_service.h"
 
 
 #if AP_DRONECAN_ENABLED
@@ -62,15 +63,15 @@ static bool pfst_check_ok = false;
  */
 void setup()
 {
-    // Keep reset-cause detection on AMOV: a brownout must not apply pending
-    // authorization as if it were an intentional cold boot.
+    // Keep brownout detection enabled on AMOV.
 #ifndef BOARD_AMOV_RID
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 #endif
 
     g.init();
     ActivationService::init();
-    // The AMOV authorization grants the China business profile only.
+    ManagementService::init();
+    // AMOV uses the China business profile.
     if (ActivationService::required()) g.rid_profile = 1;
 #if AP_DRONECAN_ENABLED
     cn_mode_active = g.rid_profile == 1;
@@ -79,13 +80,13 @@ void setup()
     led.set_state(Led::LedState::INIT);
     led.update();
 
-    if (g.webserver_enable || cn_mode_active) {
-        // need WiFi for web server
-        wifi.init();
-    }
-
     // Serial for debug printf
     Serial.begin(g.baudrate);
+
+    if (g.webserver_enable || cn_mode_active) {
+        // Start diagnostics before WiFi so startup failures are visible.
+        wifi.init();
+    }
 
 #if AP_MAVLINK_ENABLED
     // Serial1 for MAVLink
@@ -152,6 +153,8 @@ void setup()
 #if defined(STATUS_LED_INIT_DISPLAY_MS)
     led.start_init_display();
 #endif
+    // Keep the background worker available even when radio initialization fails.
+    if (ActivationService::required()) webif.update();
 }
 
 #define IMIN(x,y) ((x)<(y)?(x):(y))
@@ -436,6 +439,7 @@ static void update_cn(uint32_t now_ms)
 
 void loop()
 {
+    ManagementService::update();
 #if AP_MAVLINK_ENABLED
     mavlink1.update();
     mavlink2.update();
@@ -487,6 +491,8 @@ void loop()
 
     // web update has to happen after we update Status above
     if (g.webserver_enable) {
+        // Retry/maintain the AP even before location data permits broadcasts.
+        wifi.init();
         webif.update();
     }
 

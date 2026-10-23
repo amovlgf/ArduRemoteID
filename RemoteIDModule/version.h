@@ -1,4 +1,4 @@
 #define FW_VERSION_MAJOR 1
-#define FW_VERSION_MINOR 15
+#define FW_VERSION_MINOR 17
 
 #include "git-version.h"

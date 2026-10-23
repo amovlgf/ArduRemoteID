@@ -6,3 +6,13 @@ git-version.h
 romfs_files.h
 artifacts/
 __pycache__/
+
+# Reproducible build outputs and locally installed tools.
+/RemoteIDModule/build/
+/RemoteIDModule/build-*/
+/RemoteIDModule/*.map
+/bin/
+/arduino-cli_*.tar.gz
+
+# Per-device manufacturing data is not firmware source.
+/factory-output/

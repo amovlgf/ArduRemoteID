@@ -15,11 +15,15 @@ public:
     bool management_ready() const { return ap_ready; }
 
 private:
-    bool initialised;
+    bool initialised = false;
+    bool ap_started = false;
     bool ap_ready = false;
+    bool ip_configured = false;
+    bool reset_pending = false;
     bool mac_ready = false;
     bool init_attempted = false;
     uint32_t last_init_attempt_ms = 0;
+    uint32_t ap_start_ms = 0;
     bool cn_beacon_active = false;
     bool cn_probe_active = false;
     char ssid[32];
@@ -28,4 +32,5 @@ private:
     uint8_t send_counter_nan;
     uint8_t send_counter_beacon;
     uint8_t dBm_to_tx_power(float dBm) const;
+    bool reset_ap();
 };

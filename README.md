@@ -95,9 +95,41 @@ An opt-in experimental China profile accepts the existing DroneCAN Location
 and System messages and encodes GB 46750-2025 broadcast payloads. It requires
 explicit identity, source-node and Wi-Fi vendor-identifier configuration;
 receiver interoperability and aircraft compliance have not been established.
-See the [AMOV_RID OTA and configuration guide](docs/CN_CAN_WIFI_OTA.md) and
-[test instructions](docs/CN_TESTING.md) (Chinese). The default profile remains
-OpenDroneID.
+The default profile remains OpenDroneID on generic boards. AMOV_RID selects
+the China profile at startup and requires a valid factory identity and active
+platform state before business broadcasts are enabled.
+
+For the current AMOV feature inventory, validation results and development
+handoff in Chinese, see [the development handoff](docs/DEVELOPMENT_HANDOFF_CN.md).
+
+## AMOV factory identity and activation
+
+AMOV_RID has one firmware build for development, validation and release.
+Each device needs its own factory identity in `rid_platform/factory`: the
+module UID, 20-byte aircraft product code/SN, aircraft class, identity revision,
+and optional registration/UIN. The same standard firmware is used with test
+identities during validation. See [BUILDING.md](BUILDING.md) for preparing and
+verifying factory records and signed OTA images.
+
+For an unprovisioned module with `LOCK_LEVEL=0`, the QGC RID management page
+can bind an assigned 20-byte SN and aircraft class through the flight
+controller's device bridge. This dedicated first-provision operation checks
+the module UID and boot session, saves and reads back the identity, and cannot
+replace any existing identity. It retains OTA keys and ordinary parameters.
+Use an updated QGC that supports the provisioning capability; older clients
+continue to support ordinary management operations.
+
+A newly provisioned device starts unactivated. QGC reads its identity and
+synchronizes the platform activation status; a committed and verified change
+applies immediately. A device without a valid factory identity cannot activate.
+Ordinary parameter updates cannot replace this identity, and resetting ordinary
+settings preserves both factory identity and activation state.
+
+Firmware no longer accepts signed activation packages or imports old test
+authorizations. Application OTA preserves existing factory records and platform
+state, including records provisioned by an earlier firmware. Devices that only
+have old signed authorizations require factory provisioning before testing the
+new activation flow. No identity is embedded in the common firmware image.
 
 ## Releases
 
@@ -165,7 +197,7 @@ MissionPlanner CAN tool.
 
 The default SSID is RID_xxxxxxxx where xxxxxxxx is the factory WiFi
 MAC address of the board. The default password is ArduRemoteID.
-AMOV_RID, including AMOV_RID_TEST, instead defaults to SSID `B950_RID`
+AMOV_RID instead defaults to SSID `B950_RID`
 and password `987654321`. Saved WiFi parameters take precedence over these
 defaults when an update preserves NVS.
 
@@ -176,6 +208,18 @@ any firmware can be loaded.
 
 The web server defaults to URL http://192.168.4.1 once you connect to
 the WiFi access point.
+
+The management access point accepts up to four connected devices. Keep the
+laptop's WiFi adapter set to obtain its IPv4 address and DNS automatically;
+no permanent static IP or additional default gateway is needed. The firmware
+checks the AP interface and DHCP service periodically and retries failed
+network and HTTP listener initialization.
+
+If the SSID is missing, check the module's startup/power and AP diagnostics.
+If the SSID is connected but the page is unreachable, first check the WiFi
+adapter's IPv4 address: it should be `192.168.4.x` with gateway `192.168.4.1`.
+A `169.254.x.x` address means automatic address acquisition did not succeed.
+Having an address is a separate step from being able to reach the HTTP server.
 
 ## Firmware Signing
 

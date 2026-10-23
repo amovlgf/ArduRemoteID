@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # re-generate mavlink headers, assumes pymavlink is installed
 
 echo "Generating mavlink2 headers"
@@ -7,10 +8,10 @@ mavgen.py --wire-protocol 2.0 --lang C modules/mavlink/message_definitions/v1.0/
 
 echo "Generating DroneCAN headers for libcanard"
 rm -rf libraries/DroneCAN_generated
-python3 modules/dronecan_dsdlc/dronecan_dsdlc.py -O libraries/DroneCAN_generated modules/DSDL/uavcan modules/DSDL/dronecan modules/DSDL/com
+python3 modules/dronecan_dsdlc/dronecan_dsdlc.py -O libraries/DroneCAN_generated modules/DSDL/uavcan modules/DSDL/dronecan modules/DSDL/com protocol/amov_device_bridge/dsdl/amov
 
 # cope with horrible Arduino library handling
-PACKETS="NodeStatus GetNodeInfo HardwareVersion SoftwareVersion RestartNode dynamic_node_id remoteid param Log"
+PACKETS="NodeStatus GetNodeInfo HardwareVersion SoftwareVersion RestartNode dynamic_node_id remoteid param Log DeviceManagement"
 for p in $PACKETS; do
     (
         cd libraries/DroneCAN_generated
